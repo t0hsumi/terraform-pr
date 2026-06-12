@@ -11,4 +11,5 @@ variable "env" {
 variable "bucket_name" {
   type        = string
   description = "学習用S3バケット名（グローバルで一意）"
+  default     = "t0hsumi-learn-20260612"
 }
