@@ -1,0 +1,131 @@
+name: Terraform Drift PR (No AI)
+
+on:
+  schedule:
+    - cron: '0 4 * * *' # 13:00 JST (UTC+9)
+  workflow_dispatch:
+
+concurrency:
+  group: drift-detection-no-ai
+  cancel-in-progress: false
+
+jobs:
+  drift-detection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-northeast-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~> 1.6"
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        working-directory: main
+        run: terraform init
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: main
+        run: |
+          set +e
+          terraform plan -detailed-exitcode -no-color 2>&1 | tee "$GITHUB_WORKSPACE/plan.txt"
+          EXIT_CODE=${PIPESTATUS[0]}
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+
+      - name: Exit on error
+        if: steps.plan.outputs.exit_code == '1'
+        run: |
+          echo "terraform plan failed"
+          cat plan.txt
+          exit 1
+
+      - name: No changes detected
+        if: steps.plan.outputs.exit_code == '0'
+        run: echo "No drift detected. Skipping PR creation."
+
+      - name: Create or Update Drift PR
+        if: steps.plan.outputs.exit_code == '2'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+
+          DETECTED_AT=$(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M')
+
+          # Build PR body via temp file to avoid shell-escaping issues with multiline content
+          cat > /tmp/pr_body.md << 'DELIM'
+          ## ドリフト検出
+
+          `terraform plan` でドリフトが検出されました。
+          `.tf` ファイルを手動で修正してください。
+
+          ## 検出日時
+
+          DETECTED_AT_PLACEHOLDER (JST)
+
+          <details>
+          <summary>Terraform Plan Output</summary>
+
+          ~~~
+          DELIM
+
+          # Append dynamic content without shell injection risk
+          sed "s/DETECTED_AT_PLACEHOLDER/${DETECTED_AT}/" /tmp/pr_body.md > /tmp/pr_body_final.md
+          cat plan.txt >> /tmp/pr_body_final.md
+          printf '\n~~~\n\n</details>' >> /tmp/pr_body_final.md
+
+          # Check for existing drift PR
+          EXISTING_PR=$(gh pr list --state open --limit 100 \
+            --json number,headRefName \
+            --jq '.[] | select(.headRefName | startswith("drift/")) | .number' \
+            | head -1)
+
+          if [ -n "$EXISTING_PR" ]; then
+            BRANCH=$(gh pr view "$EXISTING_PR" --json headRefName --jq '.headRefName')
+            git fetch origin "$BRANCH"
+            git checkout "$BRANCH"
+
+            # Update timestamp file so there is something to commit
+            mkdir -p .github
+            echo "$DETECTED_AT" > .github/drift-detected-at.txt
+            git add .github/drift-detected-at.txt
+            git diff --cached --quiet || git commit -m "chore: drift re-detected at ${DETECTED_AT}"
+            git push origin "$BRANCH"
+
+            gh pr edit "$EXISTING_PR" \
+              --title "terraform: drift detected" \
+              --body-file /tmp/pr_body_final.md
+            echo "PR #${EXISTING_PR} updated"
+          else
+            BRANCH="drift/$(TZ=Asia/Tokyo date '+%Y%m%d-%H%M%S')"
+            git checkout -b "$BRANCH"
+
+            mkdir -p .github
+            echo "$DETECTED_AT" > .github/drift-detected-at.txt
+            git add .github/drift-detected-at.txt
+            git commit -m "chore: drift detected at ${DETECTED_AT}"
+            git push origin "$BRANCH"
+
+            gh pr create \
+              --title "terraform: drift detected" \
+              --body-file /tmp/pr_body_final.md \
+              --base main \
+              --head "$BRANCH"
+            echo "PR created from branch $BRANCH"
+          fi
