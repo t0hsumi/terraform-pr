@@ -64,13 +64,13 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install dependencies
+      - name: Install Claude CLI
         if: steps.plan.outputs.exit_code == '2'
-        run: pip install anthropic
+        run: npm install -g @anthropic-ai/claude-code
 
       - name: Create Drift PR
         if: steps.plan.outputs.exit_code == '2'
         env:
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python3 scripts/create_drift_pr.py

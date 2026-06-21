@@ -11,8 +11,6 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import anthropic
-
 REPO_ROOT = Path(__file__).parent.parent
 TF_FILES = [
     "main/main.tf",
@@ -90,8 +88,6 @@ def main() -> None:
         f"=== {name} ===\n{content}" for name, content in tf_contents.items()
     )
 
-    client = anthropic.Anthropic()
-
     prompt = f"""You are analyzing a Terraform drift detection report for an AWS environment.
 
 Current .tf files:
@@ -121,14 +117,13 @@ Respond with ONLY a JSON object (no markdown fences) in this exact format:
   }}
 }}"""
 
-    print("Calling Claude API to analyze drift...")
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=4096,
-        messages=[{"role": "user", "content": prompt}],
+    print("Calling Claude CLI to analyze drift...")
+    proc = subprocess.run(
+        ["claude", "-p", prompt],
+        capture_output=True, text=True, check=True,
     )
 
-    raw = message.content[0].text.strip()
+    raw = proc.stdout.strip()
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
 
