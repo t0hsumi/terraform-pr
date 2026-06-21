@@ -5,6 +5,10 @@ locals {
 # 学習用S3バケット
 resource "aws_s3_bucket" "learn" {
   bucket = var.bucket_name
+
+  tags = {
+    test = "foo"
+  }
 }
 
 resource "aws_s3_bucket_public_access_block" "learn" {
