@@ -30,8 +30,8 @@ def write_file(path: str, content: str) -> None:
     (REPO_ROOT / path).write_text(content)
 
 
-def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, check=True, cwd=REPO_ROOT, **kwargs)
+def run(cmd: list[str], cwd=None, **kwargs) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, check=True, cwd=cwd or REPO_ROOT, **kwargs)
 
 
 def build_pr_body(summary: str, changed_files: list[str], plan_output: str, detected_at: str) -> str:
